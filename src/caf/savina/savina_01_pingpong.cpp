@@ -39,6 +39,7 @@ struct send_pong_msg {
 CAF_ALLOW_UNSAFE_MESSAGE_TYPE(send_pong_msg);
 
 behavior ping_actor(stateful_actor<int>* self, int count, actor pong) {
+  cout << "ping execution unit: " << self->to_string_home_eu() << std::endl;
   self->state = count;
   return {
     [=](start_msg_atom) {
@@ -61,6 +62,7 @@ behavior ping_actor(stateful_actor<int>* self, int count, actor pong) {
 }
 
 behavior pong_actor(stateful_actor<int>* self) {
+  cout << "pong execution unit: " << self->to_string_home_eu() << std::endl;
   self->state = 0;
   return {
     [=](send_ping_msg& msg) { 
