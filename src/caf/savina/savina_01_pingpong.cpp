@@ -85,10 +85,18 @@ public:
   }
 };
 
-void caf_main(actor_system& system, const config& cfg) {
-  auto pong = system.spawn(pong_actor);
-  auto ping = system.spawn(ping_actor, cfg.n, pong);
+void starter_actor(event_based_actor* self, const config* cfg) {
+  cout << "starter execution unit: " << self->to_string_home_eu() << std::endl;
+  auto pong = self->spawn(pong_actor);
+  auto ping = self->spawn(ping_actor, cfg->n, pong);
   anon_send(ping, start_msg_atom::value);
+}
+
+void caf_main(actor_system& system, const config& cfg) {
+  system.spawn(starter_actor, &cfg);
+  //auto pong = system->spawn(pong_actor);
+  //auto ping = system->spawn(ping_actor, cfg.n, pong);
+  //anon_send(ping, start_msg_atom::value);
 }
 
 CAF_MAIN()
