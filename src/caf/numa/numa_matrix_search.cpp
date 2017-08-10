@@ -24,97 +24,15 @@
 using namespace std;
 using namespace caf;
 
-//-- generic in matrix search engine --
 using init_atom = atom_constant<atom("init")>;
 using search_atom = atom_constant<atom("search")>;
 
-template <class T>
-using matrix_t = vector<T>;
-template <class T>
-using search_fun_t = function<uint64_t(const matrix_t<T>&, const T&)>;
-
-template <class T, class U>
-behavior worker(stateful_actor<matrix_t<T>>* self, int id) {
-  return {
-    [=](init_atom, size_t x_size, size_t y_size) {
-      self->state.clear();
-      U get_line(id, x_size, y_size);
-      T line;
-      while(get_line.has_next()) {
-        line = get_line(); 
-        self->state.emplace_back(move(line));
-      }
-    },
-    [=](search_atom, const T& obj, const search_fun_t<T>& search_fun) {
-      return search_fun(self->state, obj);
-    },
-  };
-}
-
-struct controller_data {
-  vector<strong_actor_ptr> workers;
-  uint64_t result_count;
-  size_t worker_finished;
+enum class search_pattern {
+ horizontal, vertical
 };
 
-template <class T, class U>
-behavior controller(stateful_actor<controller_data>* self, size_t num_workers) {
-  for (size_t id = 0; id < num_workers; ++id) {
-    self->state.workers.emplace_back(
-      actor_cast<strong_actor_ptr>(self->spawn(worker<T, U>, id)));
-  }
-  return {
-    [=](init_atom, size_t x_size, size_t y_size) {
-      for (auto& w : self->state.workers) {
-        self->send(actor_cast<actor>(w), init_atom::value, x_size, y_size);
-      }
-    },
-    [=](search_atom, const T& obj, const search_fun_t<T>& search_fun) {
-      self->state.result_count = 0;
-      self->state.worker_finished = 0;
-      auto rp = self->template make_response_promise<uint64_t>();
-      for (auto& e : self->state.workers) {
-        self
-          ->request(actor_cast<actor>(e), infinite, search_atom::value,
-                    obj, search_fun)
-          .then([=](uint64_t result_count) mutable {
-            self->state.result_count += result_count;
-            ++self->state.worker_finished;
-            if (self->state.worker_finished >= self->state.workers.size()) {
-              rp.deliver(self->state.result_count);
-            }
-          });
-      }
-      return rp;
-    }};
-}
-
-//-- string search specification --
-
-class config : public actor_system_config {
-public:
-  int num_workers = 300;
-  int num_searches = 100;
-  int search_size = 5;
-  string search_pattern = "v"; //v=vertical, h=horizontal
-  size_t y_size = 5000;
-  size_t x_size = 250;
-
-
-  config() {
-    opt_group{custom_options_, "global"}
-      .add(num_workers, "worker", "number of workers")
-      .add(num_searches, "searches", "number of searches")
-      .add(search_size, "search-size", "size of each search")
-      .add(search_pattern, "pattern",
-           "search pattern (h=horizontal, v=vertical) ")
-      .add(y_size, "ysize", "y size of the matrix")
-      .add(x_size, "xsize", "x size of the matrix");
-  }
-};
-
-using line_t = string;
-CAF_ALLOW_UNSAFE_MESSAGE_TYPE(search_fun_t<line_t>);
+using search_t = string;
+using matrix_t = vector<search_t>;
 
 class generate_next_line {
 public:
@@ -127,8 +45,8 @@ public:
   }
 
   // generate a random strings
-  line_t operator()() {
-    line_t result;
+  search_t operator()() {
+    search_t result;
     result.reserve(x_size_);
     for (size_t i = 0; i < x_size_; ++i) {
       result.push_back(uniform_(rengine_));
@@ -148,34 +66,37 @@ private:
   size_t generated_lines_;
 };
 
-enum class search_pattern {horizontal = 1, vertical = 2};
-
-void caf_main(actor_system& system, const config& cfg) {
-  auto search_fun = [](const matrix_t<line_t> matrix,
-                                       const line_t& str, search_pattern d) {
-    uint64_t result = 0;
-    if (str.size() <= 0)
-      return result;  
-    switch(d) {
-      case search_pattern::horizontal: {
+behavior matrix_searcher(stateful_actor<matrix_t>* self, actor controller, int id) {
+  return {
+    [=](init_atom, size_t x_size, size_t y_size) {
+      self->state.clear();
+      generate_next_line get_line(id, x_size, y_size);
+      search_t line;
+      while(get_line.has_next()) {
+        line = get_line(); 
+        self->state.emplace_back(move(line));
+      }
+    },
+    [=](search_atom, search_pattern pattern, const search_t& search_obj) {
+      matrix_t& matrix = self->state;
+      uint64_t result = 0;
+      if (pattern == search_pattern::horizontal) {
         for (auto& line : matrix) {
-          for (auto pos = line.find(str); pos != string::npos;
-               pos = line.find(str, pos + 1)) {
+          for (auto pos = line.find(search_obj); pos != string::npos;
+               pos = line.find(search_obj, pos + 1)) {
             ++result;
           }
-        }
-        break;
-      }
-      case search_pattern::vertical: {
+        } 
+      } else if (pattern == search_pattern::vertical) { 
         for (size_t y = 0; y < matrix.size(); ++y) {
-          for (auto x_pos = matrix[y].find(str[0]); x_pos != string::npos;
-               x_pos = matrix[y].find(str[0], x_pos + 1)) {
+          for (auto x_pos = matrix[y].find(search_obj[0]); x_pos != string::npos;
+               x_pos = matrix[y].find(search_obj[0], x_pos + 1)) {
             if (x_pos != string::npos) {
               size_t i = 1;
-              for (size_t y1 = y + 1; y1 < matrix.size() && i < str.size(); ++y1) {
-                if (matrix[y1][x_pos] != str[i]) {
+              for (size_t y1 = y + 1; y1 < matrix.size() && i < search_obj.size(); ++y1) {
+                if (matrix[y1][x_pos] != search_obj[i]) {
                   break;
-                } else if (i == str.size() - 1) {
+                } else if (i == search_obj.size() - 1) {
                   ++result;
                 }
                 ++i;
@@ -183,11 +104,73 @@ void caf_main(actor_system& system, const config& cfg) {
             }
           }
         } 
-        break;                           
       }
+      //self->send(controller, search_obj, result);
+      //self->send(controller, result);
+      return result;
     }
-    return result;
   };
+}
+
+struct controller_data {
+  vector<actor> matrix_searchers;
+  uint64_t result_count;
+  size_t worker_finished;
+};
+
+behavior controller(stateful_actor<controller_data>* self, size_t num_workers) {
+  for (size_t id = 0; id < num_workers; ++id) {
+    self->state.matrix_searchers.emplace_back(
+      actor_cast<actor>(self->spawn(matrix_searcher, actor_cast<actor>(self), id)));
+  }
+  return {
+    [=](init_atom, size_t x_size, size_t y_size) {
+      for (auto& w : self->state.matrix_searchers) {
+        self->send(actor_cast<actor>(w), init_atom::value, x_size, y_size);
+      }
+    },
+    [=](search_atom, search_pattern pattern, const search_t& search_obj) {
+      self->state.result_count = 0;
+      self->state.worker_finished = 0;
+      auto rp = self->template make_response_promise<uint64_t>();
+      for (auto& ms : self->state.matrix_searchers) {
+        self->request(ms, infinite, search_atom::value, pattern, search_obj)
+          //.then([=](const search_t& [>search_obj<], uint64_t result_count) mutable {
+          .then([=](uint64_t result_count) mutable {
+            self->state.result_count += result_count;
+            ++self->state.worker_finished;
+            if (self->state.worker_finished >= self->state.matrix_searchers.size()) {
+              rp.deliver(self->state.result_count);
+            }
+          });
+      }
+      return rp;
+    },
+  };
+}
+
+class config : public actor_system_config {
+public:
+  int num_workers = 300;
+  int num_searches = 100;
+  int search_size = 5;
+  string search_pattern = "v"; //v=vertical, h=horizontal
+  size_t y_size = 5000;
+  size_t x_size = 250;
+
+  config() {
+    opt_group{custom_options_, "global"}
+      .add(num_workers, "worker", "number of workers")
+      .add(num_searches, "searches", "number of searches")
+      .add(search_size, "search-size", "size of each search")
+      .add(search_pattern, "pattern",
+           "search pattern (h=horizontal, v=vertical) ")
+      .add(y_size, "ysize", "y size of the matrix")
+      .add(x_size, "xsize", "x size of the matrix");
+  }
+};
+
+void caf_main(actor_system& system, const config& cfg) {
   search_pattern pattern;
   if (cfg.search_pattern == "h" ) {
     pattern = search_pattern::horizontal;
@@ -197,24 +180,24 @@ void caf_main(actor_system& system, const config& cfg) {
     cerr << "Unknown search pattern: " << cfg.search_pattern << endl;
     return;
   }
-  auto c =
-    system.spawn<detached>(controller<line_t, generate_next_line>, cfg.num_workers);
-    //system.spawn<detached>(controller<line_t, generate_next_line>, cfg.num_workers);
+  auto c = system.spawn<detached>(controller, cfg.num_workers);
+  //auto c = system.spawn(controller, cfg.num_workers);
   scoped_actor self{system};
   self->send(c, init_atom::value, cfg.x_size, cfg.y_size);
-  line_t search_obj;
   default_random_engine rengine(cfg.num_workers + cfg.x_size + cfg.y_size);
   uniform_int_distribution<char> uniform('a', 'z');
-  for (int i = 0; i < cfg.num_searches; ++i) {
-    search_obj.clear();
+  auto get_random_search_obj = [&](){
+    search_t result;
+    result.reserve(cfg.search_size);
     for (int j = 0; j < cfg.search_size; ++j) {
-      search_obj.push_back(uniform(rengine));
+      result.push_back(uniform(rengine));
     }
-    self->send(c, search_atom::value, search_obj,
-               static_cast<search_fun_t<line_t>>(
-                 [=](const matrix_t<line_t>& matrix, const line_t& obj) {
-                   return search_fun(matrix, obj, pattern);
-                 }));
+    return result;
+  };
+  search_t search_obj;
+  for (int i = 0; i < cfg.num_searches; ++i) {
+    search_obj = get_random_search_obj();
+    self->send(c, search_atom::value, pattern, search_obj);
     self->receive([&](uint64_t num_results) {
       cout << "findings for " << search_obj << ": " << num_results << std::endl;
     });
