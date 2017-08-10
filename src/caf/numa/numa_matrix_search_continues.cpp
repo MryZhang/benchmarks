@@ -191,11 +191,11 @@ behavior controller(stateful_actor<controller_data>* self, int controller_id,
 class config : public actor_system_config {
 public:
   int num_matrix_searchers = 30;
-  int num_searches = 100;
+  int num_searches = 20;
   int num_controllers = 8;
   int search_size = 6;
   string search_pattern = "v"; //v=vertical, h=horizontal
-  size_t matrix_size = 1500;
+  size_t matrix_size = 3000;
 
   config() {
     opt_group{custom_options_, "global"}
