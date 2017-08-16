@@ -31,13 +31,13 @@ Rxmax=""
 set_memory_type() {
   plot_type=$MEMORY_TYPE
   Rxlabel=""
-  Rylabel="Resident Set Size [MB]"
+  Rylabel=""
 }
 
 set_performance_type() {
   plot_type=$PERFORMANCE_TYPE
-  Rxlabel="Number of Cores [#]"
-  Rylabel="Time [s]"
+  Rxlabel=""
+  Rylabel=""
 }
 
 usage() {
