@@ -137,9 +137,9 @@ rename_labels_in_file() {
   fi
   for idx in ${!label_list[@]}; do
     if [ "$(uname)" == "Linux" ]; then
-      sed -i "s/${label_list[$idx]}/${new_label_list[$idx]}/g" "$csv_tmp_file"
+      sed -i "s/\"${label_list[$idx]}\"/\"${new_label_list[$idx]}\"/g" "$csv_tmp_file"
     elif [ "$(uname)" == "Darwin" ]; then #MacOs
-      sed -i "" "s/${label_list[$idx]}/${new_label_list[$idx]}/g" "$csv_tmp_file"
+      sed -i "" "s/\"${label_list[$idx]}\"/\"${new_label_list[$idx]}\"/g" "$csv_tmp_file"
     else
       >&2 echo "Operating System not supported"
       exit 1
